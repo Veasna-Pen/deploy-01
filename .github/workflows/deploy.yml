@@ -1,42 +1,58 @@
 name: Deploy Node.js App to DigitalOcean
 
 on:
-    push:
-        branches:
-            - main # Trigger on pushes to the main branch
+  push:
+    branches:
+      - main # Trigger on pushes to the main branch
 
 jobs:
-    deploy:
-        runs-on: ubuntu-latest # Use a fresh Ubuntu runner provided by GitHub
+  deploy:
+    runs-on: ubuntu-latest
 
-        steps:
-            - name: Checkout code
-              uses: actions/checkout@v4 # Action to checkout your repository code
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-            - name: Setup Node.js environment
-              uses: actions/setup-node@v4
-              with:
-                  node-version: "20" # Specify your Node.js version
+      - name: Setup Node.js environment
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
-            - name: Install dependencies
-              run: npm install # Install project dependencies
+      - name: Install dependencies
+        run: npm install
 
-            - name: Build TypeScript project
-              run: npm run build # Run your build script (e.g., tsc)
+      - name: Build TypeScript project
+        run: npm run build
 
-            - name: Deploy to DigitalOcean Droplet
-              uses: appleboy/ssh-action@master # Action to connect via SSH and run commands
-              with:
-                  host: ${{ secrets.SSH_HOST }} # Your Droplet's IP address
-                  username: ${{ secrets.SSH_USERNAME }} # e.g., 'root' or your created user
-                  key: ${{ secrets.SSH_PRIVATE_KEY }} # Your SSH private key
-                  script: |
-                      cd ~/deploy-01 # Navigate to your project directory on the server
-                      git pull origin main # Pull the latest code (optional, if you want to manage code on server)
-                      # Or, if you prefer to copy the built files directly:
-                      # rsync -avz --delete dist/ ${{ secrets.SSH_USERNAME }}@${{ secrets.SSH_HOST }}:~/deploy-01/dist/
+      # Step 1: Upload the built files to the server
+      - name: Upload built files to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "dist/*" # Upload only built files
+          target: "/root/deploy-01/dist" # Path on server where your app lives
 
-                      npm install --production # Install production dependencies on the server
-                      npm run build # Re-build on the server (or skip if you rsync'd dist/)
-                      pm2 restart deploy-01 # Restart your application with PM2
-                      pm2 save # Save PM2 process list to ensure it restarts on server reboot
+      # Step 2: Upload package.json and package-lock.json for production dependencies
+      - name: Upload package files to server
+        uses: appleboy/scp-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "package*.json"
+          target: "/root/deploy-01"
+
+      # Step 3: Install production dependencies and restart PM2
+      - name: Install production dependencies & restart PM2
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /root/deploy-01
+            npm install --production
+            pm2 restart deploy-01
+            pm2 save
